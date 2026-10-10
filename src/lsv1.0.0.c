@@ -6,41 +6,68 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/ioctl.h>
 #include <pwd.h>
 #include <grp.h>
 #include <time.h>
 #include <limits.h>
-#include <sys/ioctl.h>
-void do_ls(const char *dir, int long_format);
+
+#define MODE_DEFAULT 0
+#define MODE_LONG 1
+#define MODE_HORIZONTAL 2
+
+void do_ls(const char *dir, int display_mode);
 void print_long_format(const char *dir, const char *name);
-void permissions(mode_t mode, char *result);
+void print_long_path(const char *path, const char *display_name);
 void print_columns(char **names, size_t count, size_t max_length);
+void print_horizontal(char **names, size_t count, size_t max_length);
+void permissions(mode_t mode, char *result);
+void free_names(char **names, size_t count);
+
 int main(int argc, char *argv[])
 {
     int option;
-    int long_format = 0;
+    int display_mode = MODE_DEFAULT;
 
-    while ((option = getopt(argc, argv, "l")) != -1)
+    while ((option = getopt(argc, argv, "lx")) != -1)
     {
         if (option == 'l')
-            long_format = 1;
+        {
+            if (display_mode != MODE_DEFAULT)
+            {
+                fprintf(stderr, "Options -l and -x cannot be used together\n");
+                return 1;
+            }
+
+            display_mode = MODE_LONG;
+        }
+        else if (option == 'x')
+        {
+            if (display_mode != MODE_DEFAULT)
+            {
+                fprintf(stderr, "Options -l and -x cannot be used together\n");
+                return 1;
+            }
+
+            display_mode = MODE_HORIZONTAL;
+        }
         else
         {
-            fprintf(stderr, "Usage: %s [-l] [directory ...]\n", argv[0]);
+            fprintf(stderr, "Usage: %s [-l | -x] [directory ...]\n", argv[0]);
             return 1;
         }
     }
 
     if (optind == argc)
     {
-        do_ls(".", long_format);
+        do_ls(".", display_mode);
     }
     else
     {
         for (int i = optind; i < argc; i++)
         {
             printf("Directory listing of %s:\n", argv[i]);
-            do_ls(argv[i], long_format);
+            do_ls(argv[i], display_mode);
 
             if (i < argc - 1)
                 putchar('\n');
@@ -50,7 +77,7 @@ int main(int argc, char *argv[])
     return 0;
 }
 
-void do_ls(const char *dir, int long_format)
+void do_ls(const char *dir, int display_mode)
 {
     struct stat dir_stat;
 
@@ -62,8 +89,8 @@ void do_ls(const char *dir, int long_format)
 
     if (!S_ISDIR(dir_stat.st_mode))
     {
-        if (long_format)
-            print_long_format(".", dir);
+        if (display_mode == MODE_LONG)
+            print_long_path(dir, dir);
         else
             printf("%s\n", dir);
 
@@ -91,7 +118,7 @@ void do_ls(const char *dir, int long_format)
         if (entry->d_name[0] == '.')
             continue;
 
-        if (long_format)
+        if (display_mode == MODE_LONG)
         {
             print_long_format(dir, entry->d_name);
             continue;
@@ -100,17 +127,16 @@ void do_ls(const char *dir, int long_format)
         if (count == capacity)
         {
             size_t new_capacity = capacity == 0 ? 16 : capacity * 2;
-            char **temporary = realloc(names,
-                                       new_capacity * sizeof(char *));
+
+            char **temporary = realloc(
+                names,
+                new_capacity * sizeof(char *)
+            );
 
             if (temporary == NULL)
             {
                 perror("realloc");
-
-                for (size_t i = 0; i < count; i++)
-                    free(names[i]);
-
-                free(names);
+                free_names(names, count);
                 closedir(dp);
                 return;
             }
@@ -124,11 +150,7 @@ void do_ls(const char *dir, int long_format)
         if (names[count] == NULL)
         {
             perror("strdup");
-
-            for (size_t i = 0; i < count; i++)
-                free(names[i]);
-
-            free(names);
+            free_names(names, count);
             closedir(dp);
             return;
         }
@@ -146,14 +168,14 @@ void do_ls(const char *dir, int long_format)
 
     closedir(dp);
 
-    if (!long_format)
+    if (display_mode == MODE_HORIZONTAL)
+        print_horizontal(names, count, max_length);
+    else
         print_columns(names, count, max_length);
 
-    for (size_t i = 0; i < count; i++)
-        free(names[i]);
+    free_names(names, count);
+}
 
-    free(names);
-} 
 void print_columns(char **names, size_t count, size_t max_length)
 {
     if (count == 0)
@@ -198,6 +220,49 @@ void print_columns(char **names, size_t count, size_t max_length)
         putchar('\n');
     }
 }
+
+void print_horizontal(char **names, size_t count, size_t max_length)
+{
+    if (count == 0)
+        return;
+
+    struct winsize terminal_size;
+    size_t terminal_width = 80;
+
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &terminal_size) == 0 &&
+        terminal_size.ws_col > 0)
+    {
+        terminal_width = terminal_size.ws_col;
+    }
+
+    size_t spacing = 2;
+    size_t column_width = max_length + spacing;
+    size_t current_width = 0;
+
+    for (size_t i = 0; i < count; i++)
+    {
+        size_t filename_length = strlen(names[i]);
+
+        if (current_width > 0 &&
+            current_width + column_width > terminal_width)
+        {
+            putchar('\n');
+            current_width = 0;
+        }
+
+        if (current_width > 0)
+        {
+            printf("%*s", (int)spacing, "");
+            current_width += spacing;
+        }
+
+        printf("%s", names[i]);
+        current_width += filename_length;
+    }
+
+    putchar('\n');
+}
+
 void print_long_format(const char *dir, const char *name)
 {
     char path[PATH_MAX];
@@ -207,6 +272,11 @@ void print_long_format(const char *dir, const char *name)
     else
         snprintf(path, sizeof(path), "%s/%s", dir, name);
 
+    print_long_path(path, name);
+}
+
+void print_long_path(const char *path, const char *display_name)
+{
     struct stat file_stat;
 
     if (lstat(path, &file_stat) == -1)
@@ -223,7 +293,11 @@ void print_long_format(const char *dir, const char *name)
 
     char date[32];
     struct tm *time_info = localtime(&file_stat.st_mtime);
-    strftime(date, sizeof(date), "%b %e %H:%M", time_info);
+
+    if (time_info != NULL)
+        strftime(date, sizeof(date), "%b %e %H:%M", time_info);
+    else
+        strcpy(date, "unknown");
 
     printf("%s %2lu %-8s %-8s %8lld %s %s",
            mode,
@@ -232,12 +306,17 @@ void print_long_format(const char *dir, const char *name)
            group ? group->gr_name : "unknown",
            (long long)file_stat.st_size,
            date,
-           name);
+           display_name);
 
     if (S_ISLNK(file_stat.st_mode))
     {
         char target[PATH_MAX];
-        ssize_t length = readlink(path, target, sizeof(target) - 1);
+
+        ssize_t length = readlink(
+            path,
+            target,
+            sizeof(target) - 1
+        );
 
         if (length != -1)
         {
@@ -271,4 +350,15 @@ void permissions(mode_t mode, char *result)
     result[9] = mode & S_IXOTH ? 'x' : '-';
 
     result[10] = '\0';
+}
+
+void free_names(char **names, size_t count)
+{
+    if (names == NULL)
+        return;
+
+    for (size_t i = 0; i < count; i++)
+        free(names[i]);
+
+    free(names);
 }
