@@ -19,6 +19,7 @@ For example:
 ```c
 if (mode & S_IRUSR)
     printf("The owner has read permission");
+```
 # Feature 3 Report: Column Display
 
 ## Implementation Summary
