@@ -10,11 +10,11 @@
 #include <grp.h>
 #include <time.h>
 #include <limits.h>
-
+#include <sys/ioctl.h>
 void do_ls(const char *dir, int long_format);
 void print_long_format(const char *dir, const char *name);
 void permissions(mode_t mode, char *result);
-
+void print_columns(char **names, size_t count, size_t max_length);
 int main(int argc, char *argv[])
 {
     int option;
@@ -79,6 +79,11 @@ void do_ls(const char *dir, int long_format)
     }
 
     struct dirent *entry;
+    char **names = NULL;
+    size_t count = 0;
+    size_t capacity = 0;
+    size_t max_length = 0;
+
     errno = 0;
 
     while ((entry = readdir(dp)) != NULL)
@@ -87,17 +92,112 @@ void do_ls(const char *dir, int long_format)
             continue;
 
         if (long_format)
+        {
             print_long_format(dir, entry->d_name);
-        else
-            printf("%s\n", entry->d_name);
+            continue;
+        }
+
+        if (count == capacity)
+        {
+            size_t new_capacity = capacity == 0 ? 16 : capacity * 2;
+            char **temporary = realloc(names,
+                                       new_capacity * sizeof(char *));
+
+            if (temporary == NULL)
+            {
+                perror("realloc");
+
+                for (size_t i = 0; i < count; i++)
+                    free(names[i]);
+
+                free(names);
+                closedir(dp);
+                return;
+            }
+
+            names = temporary;
+            capacity = new_capacity;
+        }
+
+        names[count] = strdup(entry->d_name);
+
+        if (names[count] == NULL)
+        {
+            perror("strdup");
+
+            for (size_t i = 0; i < count; i++)
+                free(names[i]);
+
+            free(names);
+            closedir(dp);
+            return;
+        }
+
+        size_t length = strlen(names[count]);
+
+        if (length > max_length)
+            max_length = length;
+
+        count++;
     }
 
     if (errno != 0)
         perror("readdir");
 
     closedir(dp);
-}
 
+    if (!long_format)
+        print_columns(names, count, max_length);
+
+    for (size_t i = 0; i < count; i++)
+        free(names[i]);
+
+    free(names);
+} 
+void print_columns(char **names, size_t count, size_t max_length)
+{
+    if (count == 0)
+        return;
+
+    struct winsize terminal_size;
+    size_t terminal_width = 80;
+
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &terminal_size) == 0 &&
+        terminal_size.ws_col > 0)
+    {
+        terminal_width = terminal_size.ws_col;
+    }
+
+    size_t spacing = 2;
+    size_t column_width = max_length + spacing;
+    size_t columns = terminal_width / column_width;
+
+    if (columns == 0)
+        columns = 1;
+
+    if (columns > count)
+        columns = count;
+
+    size_t rows = (count + columns - 1) / columns;
+
+    for (size_t row = 0; row < rows; row++)
+    {
+        for (size_t column = 0; column < columns; column++)
+        {
+            size_t index = row + column * rows;
+
+            if (index >= count)
+                continue;
+
+            if (column == columns - 1 || index + rows >= count)
+                printf("%s", names[index]);
+            else
+                printf("%-*s", (int)column_width, names[index]);
+        }
+
+        putchar('\n');
+    }
+}
 void print_long_format(const char *dir, const char *name)
 {
     char path[PATH_MAX];

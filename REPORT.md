@@ -19,3 +19,27 @@ For example:
 ```c
 if (mode & S_IRUSR)
     printf("The owner has read permission");
+# Feature 3 Report: Column Display
+
+## Implementation Summary
+
+Feature 3 changes the default output of the `ls` program from one filename
+per line to a multiple-column display.
+
+The program reads all visible directory entries into a dynamically allocated
+array of strings. While reading the entries, it records the length of the
+longest filename. This information is required to calculate the column
+width.
+
+The terminal width is obtained using the `ioctl()` system call with the
+`TIOCGWINSZ` request. If the terminal width cannot be detected, the program
+uses a fallback width of 80 columns.
+
+The number of columns is calculated using the terminal width and the maximum
+filename length. The program then calculates the number of rows and prints
+the filenames down each column and then across.
+
+The index used for down-then-across printing is:
+
+```c
+index = row + column * rows;
