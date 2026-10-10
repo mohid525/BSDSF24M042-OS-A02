@@ -44,3 +44,21 @@ The index used for down-then-across printing is:
 
 ```c
 index = row + column * rows;
+# Feature 4 Report: Horizontal Column Display
+
+## Implementation Summary
+
+Feature 4 adds the `-x` command-line option for horizontal column display.
+
+The program now supports three display modes:
+
+- Default mode: down-then-across columns
+- `-l`: long listing format
+- `-x`: horizontal, row-major column display
+
+The display mode is stored in an integer constant:
+
+```c
+#define MODE_DEFAULT 0
+#define MODE_LONG 1
+#define MODE_HORIZONTAL 2
