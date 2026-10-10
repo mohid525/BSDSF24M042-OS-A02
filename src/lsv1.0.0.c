@@ -1,12 +1,3 @@
-/*
-* Programming Assignment 02: lsv1.0.0
-* This is the source file of version 1.0.0
-* Read the write-up of the assignment to add the features to this base version
-* Usage:
-*       $ lsv1.0.0 
-*       % lsv1.0.0  /home
-*       $ lsv1.0.0  /home/kali/   /etc/
-*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -14,50 +5,170 @@
 #include <string.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <pwd.h>
+#include <grp.h>
+#include <time.h>
+#include <limits.h>
 
-extern int errno;
+void do_ls(const char *dir, int long_format);
+void print_long_format(const char *dir, const char *name);
+void permissions(mode_t mode, char *result);
 
-void do_ls(const char *dir);
-
-int main(int argc, char const *argv[])
+int main(int argc, char *argv[])
 {
-    if (argc == 1)
+    int option;
+    int long_format = 0;
+
+    while ((option = getopt(argc, argv, "l")) != -1)
     {
-        do_ls(".");
+        if (option == 'l')
+            long_format = 1;
+        else
+        {
+            fprintf(stderr, "Usage: %s [-l] [directory ...]\n", argv[0]);
+            return 1;
+        }
+    }
+
+    if (optind == argc)
+    {
+        do_ls(".", long_format);
     }
     else
     {
-        for (int i = 1; i < argc; i++)
+        for (int i = optind; i < argc; i++)
         {
-            printf("Directory listing of %s : \n", argv[i]);
-            do_ls(argv[i]);
-	    puts("");
+            printf("Directory listing of %s:\n", argv[i]);
+            do_ls(argv[i], long_format);
+
+            if (i < argc - 1)
+                putchar('\n');
         }
     }
+
     return 0;
 }
 
-void do_ls(const char *dir)
+void do_ls(const char *dir, int long_format)
 {
-    struct dirent *entry;
-    DIR *dp = opendir(dir);
-    if (dp == NULL)
+    struct stat dir_stat;
+
+    if (lstat(dir, &dir_stat) == -1)
     {
-        fprintf(stderr, "Cannot open directory : %s\n", dir);
+        perror(dir);
         return;
     }
+
+    if (!S_ISDIR(dir_stat.st_mode))
+    {
+        if (long_format)
+            print_long_format(".", dir);
+        else
+            printf("%s\n", dir);
+
+        return;
+    }
+
+    DIR *dp = opendir(dir);
+
+    if (dp == NULL)
+    {
+        perror(dir);
+        return;
+    }
+
+    struct dirent *entry;
     errno = 0;
+
     while ((entry = readdir(dp)) != NULL)
     {
         if (entry->d_name[0] == '.')
             continue;
-        printf("%s\n", entry->d_name);
+
+        if (long_format)
+            print_long_format(dir, entry->d_name);
+        else
+            printf("%s\n", entry->d_name);
     }
 
     if (errno != 0)
-    {
-        perror("readdir failed");
-    }
+        perror("readdir");
 
     closedir(dp);
+}
+
+void print_long_format(const char *dir, const char *name)
+{
+    char path[PATH_MAX];
+
+    if (strcmp(dir, ".") == 0)
+        snprintf(path, sizeof(path), "./%s", name);
+    else
+        snprintf(path, sizeof(path), "%s/%s", dir, name);
+
+    struct stat file_stat;
+
+    if (lstat(path, &file_stat) == -1)
+    {
+        perror(path);
+        return;
+    }
+
+    char mode[11];
+    permissions(file_stat.st_mode, mode);
+
+    struct passwd *owner = getpwuid(file_stat.st_uid);
+    struct group *group = getgrgid(file_stat.st_gid);
+
+    char date[32];
+    struct tm *time_info = localtime(&file_stat.st_mtime);
+    strftime(date, sizeof(date), "%b %e %H:%M", time_info);
+
+    printf("%s %2lu %-8s %-8s %8lld %s %s",
+           mode,
+           (unsigned long)file_stat.st_nlink,
+           owner ? owner->pw_name : "unknown",
+           group ? group->gr_name : "unknown",
+           (long long)file_stat.st_size,
+           date,
+           name);
+
+    if (S_ISLNK(file_stat.st_mode))
+    {
+        char target[PATH_MAX];
+        ssize_t length = readlink(path, target, sizeof(target) - 1);
+
+        if (length != -1)
+        {
+            target[length] = '\0';
+            printf(" -> %s", target);
+        }
+    }
+
+    putchar('\n');
+}
+
+void permissions(mode_t mode, char *result)
+{
+    result[0] = S_ISDIR(mode) ? 'd' :
+                S_ISLNK(mode) ? 'l' :
+                S_ISCHR(mode) ? 'c' :
+                S_ISBLK(mode) ? 'b' :
+                S_ISFIFO(mode) ? 'p' :
+                S_ISSOCK(mode) ? 's' : '-';
+
+    result[1] = mode & S_IRUSR ? 'r' : '-';
+    result[2] = mode & S_IWUSR ? 'w' : '-';
+    result[3] = mode & S_IXUSR ? 'x' : '-';
+
+    result[4] = mode & S_IRGRP ? 'r' : '-';
+    result[5] = mode & S_IWGRP ? 'w' : '-';
+    result[6] = mode & S_IXGRP ? 'x' : '-';
+
+    result[7] = mode & S_IROTH ? 'r' : '-';
+    result[8] = mode & S_IWOTH ? 'w' : '-';
+    result[9] = mode & S_IXOTH ? 'x' : '-';
+
+    result[10] = '\0';
 }
