@@ -1,145 +1,435 @@
-# Feature 2 Report: Long Listing Format
+# Operating Systems Assignment Report
 
-## stat() versus lstat()
+## Feature 1: Project Setup and Initial Build
 
-Both `stat()` and `lstat()` retrieve file metadata. The difference is that
-`stat()` follows symbolic links and returns metadata for the link target,
-while `lstat()` returns metadata about the symbolic link itself.
+### Summary
 
-`lstat()` is more appropriate for an `ls` implementation because it allows
-the program to identify symbolic links and display them correctly.
+The project repository was created as a public GitHub repository with the
+required naming convention. The starter C source file was placed in the
+`src/` directory.
 
-## st_mode and Bitwise Operators
+The project structure includes:
 
-The `st_mode` field contains both the file type and permission bits.
+```text
+src/
+bin/
+obj/
+man/
+Makefile
+README.md
+REPORT.md
+```
 
-The bitwise AND operator `&` checks whether a specific permission bit is set.
-For example:
+The program was compiled successfully using `make`, and the executable was
+created in the `bin/` directory.
+
+The initial project was committed and pushed to the `main` branch.
+
+---
+
+## Feature 2: Long Listing Format
+
+### Summary
+
+Feature 2 adds the `-l` option. It displays detailed information about each
+file, including permissions, link count, owner, group, file size, modification
+time, and filename.
+
+The implementation uses:
+
+- `lstat()`
+- `getpwuid()`
+- `getgrgid()`
+- `strftime()`
+- Permission-bit macros
+
+### Question 1: What is the difference between `stat()` and `lstat()`?
+
+Both `stat()` and `lstat()` retrieve file metadata and store it in a
+`struct stat`.
+
+The important difference is that `stat()` follows symbolic links and returns
+metadata about the link target. In contrast, `lstat()` returns metadata about
+the symbolic link itself.
+
+In the context of `ls`, `lstat()` is more appropriate when the program needs
+to identify symbolic links and display them correctly. It prevents the
+program from treating a symbolic link as if it were the target file.
+
+### Question 2: How are file types and permissions extracted from `st_mode`?
+
+The `st_mode` field contains both the file type and permission bits. Bitwise
+operators and predefined macros can be used to examine these bits.
+
+To check whether a file is a directory:
 
 ```c
-if (mode & S_IRUSR)
+if ((file_stat.st_mode & S_IFMT) == S_IFDIR)
+    printf("Directory");
+```
+
+`S_IFMT` is a mask that extracts the file-type bits, while `S_IFDIR`
+represents a directory.
+
+Permission bits can be checked using macros such as:
+
+```c
+if (file_stat.st_mode & S_IRUSR)
     printf("The owner has read permission");
 ```
-# Feature 3 Report: Column Display
 
-## Implementation Summary
+Examples of permission macros include:
 
-Feature 3 changes the default output of the `ls` program from one filename
-per line to a multiple-column display.
+- `S_IRUSR`: owner read permission
+- `S_IWUSR`: owner write permission
+- `S_IXUSR`: owner execute permission
+- `S_IRGRP`: group read permission
+- `S_IWGRP`: group write permission
+- `S_IXGRP`: group execute permission
+- `S_IROTH`: other-user read permission
+- `S_IWOTH`: other-user write permission
+- `S_IXOTH`: other-user execute permission
+
+The bitwise AND operator `&` checks whether a particular bit is set. A
+nonzero result means that the corresponding permission or file-type flag is
+present.
+
+---
+
+## Feature 3: Column Display
+
+### Summary
+
+Feature 3 changes the default output from one filename per line to a
+multiple-column display.
 
 The program reads all visible directory entries into a dynamically allocated
-array of strings. While reading the entries, it records the length of the
-longest filename. This information is required to calculate the column
-width.
+array. It records the longest filename, obtains the terminal width using
+`ioctl()`, calculates the number of columns and rows, and prints the entries
+in down-then-across order.
 
-The terminal width is obtained using the `ioctl()` system call with the
-`TIOCGWINSZ` request. If the terminal width cannot be detected, the program
-uses a fallback width of 80 columns.
+The program uses an 80-column fallback if the terminal size cannot be
+detected.
 
-The number of columns is calculated using the terminal width and the maximum
-filename length. The program then calculates the number of rows and prints
-the filenames down each column and then across.
+### Question 1: What is the general logic for down-then-across printing?
 
-The index used for down-then-across printing is:
+The program first reads all filenames into an array. It then determines the
+longest filename and obtains the terminal width.
+
+Using the filename width and terminal width, it calculates the number of
+columns:
+
+```text
+columns = terminal_width / column_width
+```
+
+It then calculates the number of rows:
+
+```text
+rows = (number_of_files + columns - 1) / columns
+```
+
+To print down each column and then across, the array index is calculated as:
 
 ```c
 index = row + column * rows;
 ```
-# Feature 4 Report: Horizontal Column Display
 
-## Implementation Summary
+A simple loop is insufficient because it would print filenames sequentially.
+It would not know how to arrange them into rows and columns or how to align
+the columns based on the terminal width.
 
-Feature 4 adds the `-x` command-line option for horizontal column display.
+### Question 2: What is the purpose of `ioctl()`?
 
-The program now supports three display modes:
+The `ioctl()` system call is used with the `TIOCGWINSZ` request to obtain the
+current terminal dimensions.
 
-- Default mode: down-then-across columns
-- `-l`: long listing format
-- `-x`: horizontal, row-major column display
+The program uses the terminal width to calculate how many filename columns can
+fit on the screen.
 
-The display mode is stored in an integer constant:
+If the program only used a fixed fallback such as 80 columns, it would not
+adapt to different terminal sizes. On a wide terminal, it might display fewer
+columns than possible. On a narrow terminal, filenames could extend beyond
+the screen or the output could become poorly aligned.
+
+---
+
+## Feature 4: Horizontal Column Display
+
+### Summary
+
+Feature 4 adds the `-x` option for horizontal, row-major output.
+
+The program supports three display modes:
 
 ```c
 #define MODE_DEFAULT 0
 #define MODE_LONG 1
 #define MODE_HORIZONTAL 2
 ```
-# Feature 5 Report: Alphabetical Sorting
 
-## Implementation Summary
+The modes are:
+
+- Default: down-then-across column display
+- `-l`: long listing format
+- `-x`: horizontal, across-then-wrapping display
+
+The `-l` and `-x` options are mutually exclusive.
+
+### Question 1: Which printing method is more complex?
+
+The down-then-across method is more complex because it requires more
+pre-calculation.
+
+It must know:
+
+- The total number of filenames
+- The longest filename
+- The terminal width
+- The number of columns
+- The number of rows
+
+It also requires an index calculation such as:
+
+```c
+index = row + column * rows;
+```
+
+The horizontal method is simpler. It processes filenames from left to right
+and keeps track of the current horizontal position. When the next filename
+would exceed the terminal width, it starts a new line.
+
+### Question 2: How are the different display modes managed?
+
+The program stores the selected display mode in an integer variable.
+
+The `getopt()` function checks for `-l` and `-x`. Depending on the option, the
+program sets the mode to `MODE_LONG` or `MODE_HORIZONTAL`. If no option is
+provided, the mode remains `MODE_DEFAULT`.
+
+After reading and sorting the filenames, the program selects the appropriate
+function:
+
+```c
+if (display_mode == MODE_LONG)
+    print_long_format(...);
+else if (display_mode == MODE_HORIZONTAL)
+    print_horizontal(...);
+else
+    print_columns(...);
+```
+
+---
+
+## Feature 5: Alphabetical Sorting
+
+### Summary
 
 Feature 5 adds alphabetical sorting using the standard C library function
 `qsort()`.
 
-All visible directory entries are first stored in a dynamically allocated
-array. After reading is complete, the array is sorted before any display
-function is called. The sorted array is then passed to the default column,
-horizontal column, or long-listing display function.
+All filenames are first stored in a dynamically allocated array. After the
+directory has been completely read, the array is sorted using a comparison
+function based on `strcmp()`.
 
-The comparison function receives two `const void *` arguments, converts them
-to string pointers, and compares the filenames using `strcmp()`.
+The sorted filenames are then passed to the selected display function.
 
-Sorting is applied to all display modes:
+Sorting applies to:
 
-- Default down-then-across output
+- Default column output
 - Horizontal `-x` output
-- Long listing `-l` output
+- Long `-l` output
 
-## Report Question 1
+### Question 1: Why must all entries be stored before sorting?
 
-All directory entries must be stored before sorting because `qsort()` operates
-on an existing collection of elements. A directory stream provides entries
-one at a time, so the program must first copy the filenames into memory.
+A directory stream provides entries one at a time. However, `qsort()` sorts
+an existing collection of elements. Therefore, the program must first copy
+all filenames into a dynamically allocated array.
 
-The disadvantage is that memory usage grows with the number of directory
-entries. A directory containing millions of files could require a large
-amount of memory. However, storing all entries is necessary for sorting the
-complete directory listing.
+The disadvantage is increased memory usage. A directory containing millions of
+files could require a large amount of memory to store all filenames and
+pointers.
 
-## Report Question 2
+Despite this limitation, storing all entries is necessary to sort the
+complete directory listing before displaying it.
 
-The comparison function tells `qsort()` how to order the filenames. It receives
-pointers to two array elements, converts them to string pointers, and calls
-`strcmp()` to compare the names alphabetically.
+### Question 2: What is the purpose and signature of the comparison function?
 
-The arguments are declared as `const void *` because `qsort()` is a generic
-function that can sort arrays containing different data types. The `const`
-keyword prevents the comparison function from modifying the array elements.
+The comparison function tells `qsort()` how two filenames should be ordered.
 
+Its signature is:
+
+```c
+int compare_names(const void *first, const void *second);
 ```
-# Feature 6 Report: Colorized Output
 
-## ANSI Escape Codes
+The function converts the generic pointers into string pointers and compares
+the strings using `strcmp()`:
 
-ANSI escape codes are special character sequences beginning with the escape
-character. They instruct the terminal to change text formatting or color.
+```c
+int compare_names(const void *first, const void *second)
+{
+    const char *name_first = *(const char * const *)first;
+    const char *name_second = *(const char * const *)second;
+
+    return strcmp(name_first, name_second);
+}
+```
+
+The parameters are `const void *` because `qsort()` is a generic function that
+can sort arrays of different data types. The `const` qualifier prevents the
+comparison function from modifying the array elements.
+
+---
+
+## Feature 6: Colorized Output
+
+### Summary
+
+Feature 6 adds colorized output based on file type and permissions.
+
+The program uses `lstat()` to inspect each file before printing its name.
+
+The color rules are:
+
+- Directories: blue
+- Executable files: green
+- Archive files: red
+- Symbolic links: cyan
+- Special files: reverse video
+- Normal files: default terminal color
+
+ANSI reset codes are printed after colored filenames so that later output is
+not affected.
+
+### Question 1: How do ANSI escape codes produce color?
+
+ANSI escape codes are special character sequences understood by standard Linux
+terminals. They begin with the escape character and control text formatting.
 
 For example, green text can be printed using:
 
 ```c
 printf("\033[32m%s\033[0m", filename);
+```
 
-## Recursive Listing Questions
+The sequence `\033[32m` changes the text color to green. The sequence
+`\033[0m` resets the terminal formatting to its default state.
 
-### What is a base case?
+The program stores these sequences in macros such as:
+
+```c
+#define COLOR_GREEN "\033[32m"
+#define COLOR_RESET "\033[0m"
+```
+
+### Question 2: Which permission bits identify executable files?
+
+The `st_mode` field contains execute permission bits for the owner, group,
+and other users.
+
+The relevant macros are:
+
+- `S_IXUSR`: owner execute permission
+- `S_IXGRP`: group execute permission
+- `S_IXOTH`: other-user execute permission
+
+The program checks them using:
+
+```c
+if (file_stat.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH))
+{
+    /* The file is executable */
+}
+```
+
+If any of these bits is set, the file is treated as executable and printed in
+green.
+
+---
+
+## Feature 7: Recursive Listing
+
+### Summary
+
+Feature 7 adds the `-R` option for recursive directory listing.
+
+When `-R` is used, the program:
+
+1. Prints the current directory header.
+2. Reads and sorts the directory entries.
+3. Displays the entries using the selected display mode.
+4. Constructs a full path for each entry.
+5. Uses `lstat()` to retrieve metadata.
+6. Checks whether the entry is a directory.
+7. Recursively calls `do_ls()` for each subdirectory.
+
+The recursive option works with other display modes:
+
+```text
+-R
+-lR
+-xR
+```
+
+Hidden files remain excluded because entries beginning with `.` are skipped.
+
+### Question 1: What is a base case?
 
 A base case is the condition that stops a recursive function from calling
-itself again. Every recursive function must eventually reach its base case;
+itself again. Every recursive function must eventually reach a base case;
 otherwise, it will continue calling itself until the program runs out of
 stack memory.
 
-In a recursive `ls` implementation, recursion stops when the program has
-finished reading the current directory and there are no more subdirectories
-that need to be visited. The function also stops recursing when it encounters
-a path that cannot be opened or when the entry is not a directory.
+In recursive `ls`, recursion stops when the current directory has been
+processed and there are no more subdirectories to visit.
 
-Symbolic links should not be followed blindly because they can create cycles
-that may cause infinite recursion.
+Recursion also stops when:
 
-### Why is constructing the full path necessary?
+- The path cannot be opened
+- The entry is not a directory
+- The directory contains no subdirectories
+
+Symbolic links should not be followed blindly because they can create cycles.
+The program uses `lstat()` to identify symbolic links and does not recurse
+through them.
+
+### Question 2: Why is constructing the full path necessary?
 
 Before making a recursive call, the program must construct the complete path
 of the subdirectory:
 
 ```text
 parent_dir/subdir
+```
+
+For example:
+
+```c
+do_ls("parent_dir/subdir", display_mode, recursive);
+```
+
+The full path tells the operating system exactly which directory to open.
+
+If the program called:
+
+```c
+do_ls("subdir", display_mode, recursive);
+```
+
+the operating system would search for `subdir` relative to the program's
+current working directory instead of relative to `parent_dir`.
+
+This could cause the program to:
+
+- Report that the directory does not exist
+- Open the wrong directory
+- Repeatedly visit an unintended path
+- Fail to process nested directories correctly
+
+Constructing the full path preserves the correct location as recursion moves
+deeper into the directory tree:
+
+```text
+parent_dir/subdir/nested_dir
+```
