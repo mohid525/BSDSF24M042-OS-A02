@@ -23,7 +23,7 @@ void print_columns(char **names, size_t count, size_t max_length);
 void print_horizontal(char **names, size_t count, size_t max_length);
 void permissions(mode_t mode, char *result);
 void free_names(char **names, size_t count);
-
+int compare_names(const void *first, const void *second);
 int main(int argc, char *argv[])
 {
     int option;
@@ -118,12 +118,6 @@ void do_ls(const char *dir, int display_mode)
         if (entry->d_name[0] == '.')
             continue;
 
-        if (display_mode == MODE_LONG)
-        {
-            print_long_format(dir, entry->d_name);
-            continue;
-        }
-
         if (count == capacity)
         {
             size_t new_capacity = capacity == 0 ? 16 : capacity * 2;
@@ -168,10 +162,26 @@ void do_ls(const char *dir, int display_mode)
 
     closedir(dp);
 
-    if (display_mode == MODE_HORIZONTAL)
+    qsort(
+        names,
+        count,
+        sizeof(char *),
+        compare_names
+    );
+
+    if (display_mode == MODE_LONG)
+    {
+        for (size_t i = 0; i < count; i++)
+            print_long_format(dir, names[i]);
+    }
+    else if (display_mode == MODE_HORIZONTAL)
+    {
         print_horizontal(names, count, max_length);
+    }
     else
+    {
         print_columns(names, count, max_length);
+    }
 
     free_names(names, count);
 }
@@ -361,4 +371,12 @@ void free_names(char **names, size_t count)
         free(names[i]);
 
     free(names);
+}
+
+int compare_names(const void *first, const void *second)
+{
+    const char *name_first = *(const char * const *)first;
+    const char *name_second = *(const char * const *)second;
+
+    return strcmp(name_first, name_second);
 }
