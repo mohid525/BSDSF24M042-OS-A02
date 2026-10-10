@@ -23,7 +23,7 @@
 #define COLOR_REVERSE "\033[7m"
 #define COLOR_RESET "\033[0m"
 
-void do_ls(const char *dir, int display_mode);
+void do_ls(const char *dir, int display_mode, int recursive);
 void print_long_format(const char *dir, const char *name);
 void print_long_path(const char *path, const char *display_name);
 void print_columns(const char *dir, char **names, size_t count,
@@ -36,13 +36,16 @@ void permissions(mode_t mode, char *result);
 void free_names(char **names, size_t count);
 int compare_names(const void *first, const void *second);
 int ends_with(const char *text, const char *suffix);
+void build_path(const char *dir, const char *name,
+                char *path, size_t path_size);
 
 int main(int argc, char *argv[])
 {
     int option;
     int display_mode = MODE_DEFAULT;
+    int recursive = 0;
 
-    while ((option = getopt(argc, argv, "lx")) != -1)
+    while ((option = getopt(argc, argv, "lxR")) != -1)
     {
         if (option == 'l')
         {
@@ -64,33 +67,45 @@ int main(int argc, char *argv[])
 
             display_mode = MODE_HORIZONTAL;
         }
+        else if (option == 'R')
+        {
+            recursive = 1;
+        }
         else
         {
-            fprintf(stderr, "Usage: %s [-l | -x] [directory ...]\n", argv[0]);
+            fprintf(stderr, "Usage: %s [-l | -x] [-R] [directory ...]\n",
+                    argv[0]);
             return 1;
         }
     }
 
     if (optind == argc)
     {
-        do_ls(".", display_mode);
+        do_ls(".", display_mode, recursive);
     }
     else
     {
         for (int i = optind; i < argc; i++)
         {
-            printf("Directory listing of %s:\n", argv[i]);
-            do_ls(argv[i], display_mode);
+            if (recursive)
+            {
+                do_ls(argv[i], display_mode, recursive);
+            }
+            else
+            {
+                printf("Directory listing of %s:\n", argv[i]);
+                do_ls(argv[i], display_mode, recursive);
 
-            if (i < argc - 1)
-                putchar('\n');
+                if (i < argc - 1)
+                    putchar('\n');
+            }
         }
     }
 
     return 0;
 }
 
-void do_ls(const char *dir, int display_mode)
+void do_ls(const char *dir, int display_mode, int recursive)
 {
     struct stat dir_stat;
 
@@ -112,6 +127,9 @@ void do_ls(const char *dir, int display_mode)
 
         return;
     }
+
+    if (recursive)
+        printf("%s:\n", dir);
 
     DIR *dp = opendir(dir);
 
@@ -194,7 +212,41 @@ void do_ls(const char *dir, int display_mode)
         print_columns(dir, names, count, max_length);
     }
 
+    if (recursive)
+    {
+        for (size_t i = 0; i < count; i++)
+        {
+            char full_path[PATH_MAX];
+            struct stat child_stat;
+
+            build_path(dir, names[i], full_path, sizeof(full_path));
+
+            if (lstat(full_path, &child_stat) == -1)
+            {
+                perror(full_path);
+                continue;
+            }
+
+            if (S_ISDIR(child_stat.st_mode))
+            {
+                putchar('\n');
+                do_ls(full_path, display_mode, recursive);
+            }
+        }
+    }
+
     free_names(names, count);
+}
+
+void build_path(const char *dir, const char *name,
+                char *path, size_t path_size)
+{
+    if (strcmp(dir, ".") == 0)
+        snprintf(path, path_size, "./%s", name);
+    else if (dir[strlen(dir) - 1] == '/')
+        snprintf(path, path_size, "%s%s", dir, name);
+    else
+        snprintf(path, path_size, "%s/%s", dir, name);
 }
 
 void print_columns(const char *dir, char **names, size_t count,
@@ -293,11 +345,7 @@ void print_colored_name(const char *dir, const char *name)
 {
     char path[PATH_MAX];
 
-    if (strcmp(dir, ".") == 0)
-        snprintf(path, sizeof(path), "./%s", name);
-    else
-        snprintf(path, sizeof(path), "%s/%s", dir, name);
-
+    build_path(dir, name, path, sizeof(path));
     print_colored_path(path, name);
 }
 
@@ -314,32 +362,22 @@ void print_colored_path(const char *path, const char *display_name)
     const char *color = NULL;
 
     if (S_ISDIR(file_stat.st_mode))
-    {
         color = COLOR_BLUE;
-    }
     else if (S_ISLNK(file_stat.st_mode))
-    {
         color = COLOR_CYAN;
-    }
     else if (S_ISCHR(file_stat.st_mode) ||
              S_ISBLK(file_stat.st_mode) ||
              S_ISFIFO(file_stat.st_mode) ||
              S_ISSOCK(file_stat.st_mode))
-    {
         color = COLOR_REVERSE;
-    }
     else if (ends_with(display_name, ".tar") ||
              ends_with(display_name, ".gz") ||
              ends_with(display_name, ".zip") ||
              ends_with(display_name, ".bz2") ||
              ends_with(display_name, ".xz"))
-    {
         color = COLOR_RED;
-    }
     else if (file_stat.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH))
-    {
         color = COLOR_GREEN;
-    }
 
     if (color != NULL)
         printf("%s%s%s", color, display_name, COLOR_RESET);
@@ -351,11 +389,7 @@ void print_long_format(const char *dir, const char *name)
 {
     char path[PATH_MAX];
 
-    if (strcmp(dir, ".") == 0)
-        snprintf(path, sizeof(path), "./%s", name);
-    else
-        snprintf(path, sizeof(path), "%s/%s", dir, name);
-
+    build_path(dir, name, path, sizeof(path));
     print_long_path(path, name);
 }
 
@@ -413,28 +447,6 @@ void print_long_path(const char *path, const char *display_name)
     putchar('\n');
 }
 
-int compare_names(const void *first, const void *second)
-{
-    const char *name_first = *(const char * const *)first;
-    const char *name_second = *(const char * const *)second;
-
-    return strcmp(name_first, name_second);
-}
-
-int ends_with(const char *text, const char *suffix)
-{
-    size_t text_length = strlen(text);
-    size_t suffix_length = strlen(suffix);
-
-    if (suffix_length > text_length)
-        return 0;
-
-    return strcmp(
-        text + text_length - suffix_length,
-        suffix
-    ) == 0;
-}
-
 void permissions(mode_t mode, char *result)
 {
     result[0] = S_ISDIR(mode) ? 'd' :
@@ -457,6 +469,28 @@ void permissions(mode_t mode, char *result)
     result[9] = mode & S_IXOTH ? 'x' : '-';
 
     result[10] = '\0';
+}
+
+int compare_names(const void *first, const void *second)
+{
+    const char *name_first = *(const char * const *)first;
+    const char *name_second = *(const char * const *)second;
+
+    return strcmp(name_first, name_second);
+}
+
+int ends_with(const char *text, const char *suffix)
+{
+    size_t text_length = strlen(text);
+    size_t suffix_length = strlen(suffix);
+
+    if (suffix_length > text_length)
+        return 0;
+
+    return strcmp(
+        text + text_length - suffix_length,
+        suffix
+    ) == 0;
 }
 
 void free_names(char **names, size_t count)
