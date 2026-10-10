@@ -105,3 +105,41 @@ pointers to two array elements, converts them to string pointers, and calls
 The arguments are declared as `const void *` because `qsort()` is a generic
 function that can sort arrays containing different data types. The `const`
 keyword prevents the comparison function from modifying the array elements.
+
+```
+# Feature 6 Report: Colorized Output
+
+## ANSI Escape Codes
+
+ANSI escape codes are special character sequences beginning with the escape
+character. They instruct the terminal to change text formatting or color.
+
+For example, green text can be printed using:
+
+```c
+printf("\033[32m%s\033[0m", filename);
+
+## Recursive Listing Questions
+
+### What is a base case?
+
+A base case is the condition that stops a recursive function from calling
+itself again. Every recursive function must eventually reach its base case;
+otherwise, it will continue calling itself until the program runs out of
+stack memory.
+
+In a recursive `ls` implementation, recursion stops when the program has
+finished reading the current directory and there are no more subdirectories
+that need to be visited. The function also stops recursing when it encounters
+a path that cannot be opened or when the entry is not a directory.
+
+Symbolic links should not be followed blindly because they can create cycles
+that may cause infinite recursion.
+
+### Why is constructing the full path necessary?
+
+Before making a recursive call, the program must construct the complete path
+of the subdirectory:
+
+```text
+parent_dir/subdir
